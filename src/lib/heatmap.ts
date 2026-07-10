@@ -5,6 +5,8 @@ import {
   type FloorPlan,
   type Opening,
   type Point,
+  type RoomSignal,
+  type SignalLevel,
   type Wall,
 } from '../types/floorplan';
 import { dist, pointOnWall, segmentHitsWall, wallLength } from './geometry';
@@ -193,4 +195,30 @@ export function summarizeCoverage(result: HeatmapResult): {
 
 export function openingCenter(wall: Wall, opening: Opening): Point {
   return pointOnWall(wall, opening.t);
+}
+
+export function signalLevel(rssi: number): SignalLevel {
+  if (rssi >= -55) return 'excellent';
+  if (rssi >= -67) return 'good';
+  if (rssi >= -75) return 'weak';
+  return 'poor';
+}
+
+/** Best RSSI (across all APs) at an arbitrary point on the plan. */
+export function bestRssiAt(plan: FloorPlan, point: Point): number {
+  let best = -120;
+  for (const ap of plan.aps) {
+    const rssi = rssiAt(point, ap, plan.walls, plan.openings, plan.pixelsPerMeter);
+    if (rssi > best) best = rssi;
+  }
+  return best;
+}
+
+/** Estimate the signal at each labelled room (using the room label position). */
+export function roomSignals(plan: FloorPlan): RoomSignal[] {
+  if (!plan.aps.length) return [];
+  return plan.rooms.map((room) => {
+    const rssi = bestRssiAt(plan, { x: room.x, y: room.y });
+    return { roomId: room.id, name: room.name, rssi, level: signalLevel(rssi) };
+  });
 }

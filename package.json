@@ -1,9 +1,9 @@
 {
-  "name": "changtu-wifi-ai-planner",
+  "name": "luci-app-ai-planner",
   "private": true,
   "version": "0.1.0",
   "type": "module",
-  "description": "场图 Changtu — AI floor-plan Wi-Fi coverage planner",
+  "description": "luci-app-ai-planner — AI floor-plan Wi-Fi coverage planner",
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",

@@ -249,6 +249,138 @@
   background: rgba(15, 118, 110, 0.06);
 }
 
+.wizard {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.router-card {
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  padding: 10px 12px;
+}
+
+.router-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.router-top strong {
+  font-size: 0.95rem;
+}
+
+.src {
+  font-size: 0.68rem;
+  padding: 2px 8px;
+  border-radius: 999px;
+  white-space: nowrap;
+}
+
+.src.openwrt {
+  background: rgba(15, 118, 110, 0.14);
+  color: var(--teal-deep);
+}
+
+.src.demo {
+  background: rgba(194, 65, 12, 0.14);
+  color: #c2410c;
+}
+
+.router-fw {
+  margin: 4px 0 0;
+  color: var(--muted);
+  font-size: 0.78rem;
+}
+
+.radio-list {
+  list-style: none;
+  margin: 8px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.radio-list li {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+  font-size: 0.76rem;
+  color: var(--muted);
+}
+
+.radio-list .band {
+  background: var(--teal);
+  color: #ecfdf5;
+  border-radius: 8px;
+  padding: 1px 7px;
+  font-weight: 700;
+}
+
+.router-clients {
+  margin: 8px 0 0;
+  font-size: 0.8rem;
+  color: var(--ink);
+}
+
+.room-signals {
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  padding: 10px 12px;
+}
+
+.room-signals h4 {
+  margin: 0 0 8px;
+  font-size: 0.78rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.room-signals ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.room-signals li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.84rem;
+}
+
+.room-signals .dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 999px;
+  flex: none;
+}
+
+.room-signals .rname {
+  flex: 1;
+  font-weight: 600;
+}
+
+.room-signals .rrssi {
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.room-signals .rlevel {
+  font-size: 0.74rem;
+  color: var(--muted);
+}
+
 .stats {
   display: grid;
   grid-template-columns: repeat(3, 1fr);

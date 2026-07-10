@@ -1,12 +1,22 @@
 import { create } from 'zustand';
-import { analyzeCoverage, loadAiSettings, recognizeFloorPlan, saveAiSettings, type AiSettings } from '../lib/ai';
-import { computeHeatmap, summarizeCoverage, type HeatmapResult } from '../lib/heatmap';
+import {
+  analyzeCoverage,
+  generateFloorPlan,
+  loadAiSettings,
+  recognizeFloorPlan,
+  routerInfoToText,
+  saveAiSettings,
+  type AiSettings,
+} from '../lib/ai';
+import { computeHeatmap, roomSignals, summarizeCoverage, type HeatmapResult } from '../lib/heatmap';
+import { fetchRouterInfo } from '../lib/openwrt';
 import type {
   AccessPoint,
   FloorPlan,
   Opening,
   Point,
   RoomLabel,
+  RouterInfo,
   Stroke,
   Tool,
   Wall,
@@ -41,6 +51,8 @@ interface PlannerState {
   status: string;
   canvasWidth: number;
   canvasHeight: number;
+  routerInfo: RouterInfo | null;
+  routerBusy: boolean;
 
   setTool: (tool: Tool) => void;
   setMaterial: (m: WallMaterial) => void;
@@ -66,6 +78,29 @@ interface PlannerState {
   recomputeHeatmap: () => void;
   runAiRecognize: (imageDataUrl?: string) => Promise<void>;
   runAiAnalyze: () => Promise<void>;
+  fetchRouterInfo: () => Promise<void>;
+  generatePlanFromRouter: (note?: string) => Promise<void>;
+}
+
+/** Auto-place the router AP at the centroid of the plan's walls (or canvas center). */
+function apFromRouter(plan: FloorPlan, info: RouterInfo | null): AccessPoint {
+  let x = CANVAS_W / 2;
+  let y = CANVAS_H / 2;
+  if (plan.walls.length) {
+    const xs = plan.walls.flatMap((w) => [w.a.x, w.b.x]);
+    const ys = plan.walls.flatMap((w) => [w.a.y, w.b.y]);
+    x = (Math.min(...xs) + Math.max(...xs)) / 2;
+    y = (Math.min(...ys) + Math.max(...ys)) / 2;
+  }
+  const radio = info?.radios.find((r) => r.band === '5') ?? info?.radios[0];
+  return {
+    id: uid('ap'),
+    x,
+    y,
+    label: info ? info.model.replace(/\s*\(.*\)$/, '') : 'AP1',
+    power: radio?.txpower ?? 20,
+    band: radio?.band ?? '5',
+  };
 }
 
 function refreshHeatmap(plan: FloorPlan, show: boolean): HeatmapResult | null {
@@ -85,9 +120,11 @@ export const usePlannerStore = create<PlannerState>((set, get) => ({
   aiSettings: loadAiSettings(),
   aiBusy: false,
   aiAdvice: '绘制或手绘户型，点击「AI 识别户型」；放置路由器后可查看信号图谱并让 AI 分析。',
-  status: '选择「墙」工具，点击两点绘制墙体',
+  status: '第一步：点击「获取路由信息」，从 OpenWrt 读取路由器数据（未连接路由时使用演示数据）',
   canvasWidth: CANVAS_W,
   canvasHeight: CANVAS_H,
+  routerInfo: null,
+  routerBusy: false,
 
   setTool: (tool) => set({ tool, draftWallStart: null, status: toolHint(tool) }),
   setMaterial: (material) => set({ material }),
@@ -263,28 +300,93 @@ export const usePlannerStore = create<PlannerState>((set, get) => ({
   },
 
   runAiAnalyze: async () => {
-    const { plan, heatmap, aiSettings } = get();
+    const { plan, heatmap, aiSettings, routerInfo } = get();
     if (!plan.aps.length) {
       set({ status: '请先放置至少一个路由器' });
       return;
     }
-    set({ aiBusy: true, status: 'AI 正在分析覆盖…' });
+    set({ aiBusy: true, status: 'AI 正在分析路由位置与房间信号…' });
     try {
       const stats = heatmap ? summarizeCoverage(heatmap) : null;
+      const rooms = roomSignals(plan);
+      const levelText: Record<string, string> = {
+        excellent: '优秀',
+        good: '良好',
+        weak: '偏弱',
+        poor: '较差',
+      };
       const summary = [
-        `墙体数量: ${plan.walls.length}`,
-        `门窗数量: ${plan.openings.length}`,
-        `AP 数量: ${plan.aps.length}，频段: ${get().band} GHz`,
-        `比例尺: ${plan.pixelsPerMeter} px/m`,
-        `房间: ${plan.rooms.map((r) => r.name).join('、') || '未标注'}`,
+        routerInfo ? `路由器信息:\n${routerInfoToText(routerInfo)}` : 'AP 由手动放置',
+        `墙体数量: ${plan.walls.length}，门窗数量: ${plan.openings.length}`,
+        `AP 数量: ${plan.aps.length}，当前频段: ${get().band} GHz，比例尺: ${plan.pixelsPerMeter} px/m`,
+        rooms.length
+          ? `各房间信号:\n${rooms
+              .map((r) => `  ${r.name}: ${r.rssi.toFixed(0)}dBm（${levelText[r.level]}）`)
+              .join('\n')}`
+          : `房间: ${plan.rooms.map((r) => r.name).join('、') || '未标注'}`,
         stats
-          ? `覆盖占比 优秀(≥-55dBm): ${(stats.excellent * 100).toFixed(0)}%, 良好: ${(stats.good * 100).toFixed(0)}%, 偏弱: ${(stats.weak * 100).toFixed(0)}%, 较差: ${(stats.poor * 100).toFixed(0)}%`
+          ? `整体覆盖占比 优秀(≥-55dBm): ${(stats.excellent * 100).toFixed(0)}%, 良好: ${(stats.good * 100).toFixed(0)}%, 偏弱: ${(stats.weak * 100).toFixed(0)}%, 较差: ${(stats.poor * 100).toFixed(0)}%`
           : '暂无热力图统计',
+        '请分析路由器在户型中的位置是否合理、各房间信号是否达标，并给出摆放/频段/Mesh 建议。',
       ].join('\n');
       const advice = await analyzeCoverage({ summary, settings: aiSettings });
       set({ aiAdvice: advice, status: '分析完成' });
     } catch (e) {
       set({ status: e instanceof Error ? e.message : '分析失败' });
+    } finally {
+      set({ aiBusy: false });
+    }
+  },
+
+  fetchRouterInfo: async () => {
+    set({ routerBusy: true, status: '正在从 OpenWrt 读取路由器信息…' });
+    try {
+      const info = await fetchRouterInfo();
+      set({
+        routerInfo: info,
+        band: info.radios.find((r) => r.band === '5')?.band ?? info.radios[0]?.band ?? get().band,
+        status:
+          info.source === 'openwrt'
+            ? `已读取路由器：${info.model}（${info.clients} 台终端）。下一步「AI 生成户型」`
+            : `未连接 OpenWrt，使用演示路由：${info.model}。下一步「AI 生成户型」`,
+      });
+    } catch (e) {
+      set({ status: e instanceof Error ? e.message : '读取路由器信息失败' });
+    } finally {
+      set({ routerBusy: false });
+    }
+  },
+
+  generatePlanFromRouter: async (note) => {
+    let info = get().routerInfo;
+    set({ aiBusy: true, status: 'AI 正在根据路由器信息生成户型…' });
+    try {
+      if (!info) {
+        info = await fetchRouterInfo();
+        set({ routerInfo: info });
+      }
+      const result = await generateFloorPlan({ routerInfo: info, note, settings: get().aiSettings });
+      if (result.plan) {
+        const ap = apFromRouter(result.plan, info);
+        const merged: FloorPlan = {
+          ...result.plan,
+          aps: [ap],
+          pixelsPerMeter: result.plan.pixelsPerMeter || get().plan.pixelsPerMeter,
+        };
+        set({
+          plan: merged,
+          band: ap.band,
+          heatmap: refreshHeatmap(merged, get().showHeatmap),
+          aiAdvice: result.advice,
+          status: get().aiSettings.apiKey
+            ? 'AI 已生成户型并放置路由，下一步「AI 分析位置与信号」；户型不准可手动修改'
+            : '已生成演示户型并放置路由（未配置 API Key）；户型不准可手动修改',
+        });
+      } else {
+        set({ aiAdvice: result.advice, status: '未能生成有效户型' });
+      }
+    } catch (e) {
+      set({ status: e instanceof Error ? e.message : '生成失败', aiAdvice: String(e) });
     } finally {
       set({ aiBusy: false });
     }
