@@ -64,6 +64,43 @@ export interface FloorPlan {
   pixelsPerMeter: number;
 }
 
+export type SignalLevel = 'excellent' | 'good' | 'weak' | 'poor';
+
+/** One radio of the router, as reported by OpenWrt (iwinfo / network.wireless) */
+export interface RouterRadio {
+  band: '2.4' | '5' | '6';
+  ssid?: string;
+  channel?: number;
+  /** transmit power in dBm */
+  txpower?: number;
+  htmode?: string;
+  /** associated client count on this radio */
+  clients?: number;
+}
+
+/** Router information, sourced from an OpenWrt system (ubus) or a demo fallback */
+export interface RouterInfo {
+  model: string;
+  boardName?: string;
+  firmware?: string;
+  radios: RouterRadio[];
+  /** total associated clients across radios */
+  clients: number;
+  /** seconds since boot */
+  uptime?: number;
+  /** where the data came from */
+  source: 'openwrt' | 'demo';
+}
+
+/** Per-room signal estimate derived from the heatmap simulation */
+export interface RoomSignal {
+  roomId: string;
+  name: string;
+  /** best RSSI at the room label position, dBm */
+  rssi: number;
+  level: SignalLevel;
+}
+
 export interface AiFloorPlanPayload {
   units: 'm';
   scale?: { pixelsPerMeter: number };

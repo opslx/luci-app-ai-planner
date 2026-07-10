@@ -1,0 +1,12 @@
+{
+	"luci-app-ai-planner": {
+		"description": "Grant read access to router info used by the AI Wi-Fi planner",
+		"read": {
+			"ubus": {
+				"system": ["board", "info"],
+				"network.wireless": ["status"],
+				"iwinfo": ["devices", "info", "assoclist"]
+			}
+		}
+	}
+}

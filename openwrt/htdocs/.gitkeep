@@ -1,0 +1,3 @@
+# Prebuilt web assets go here before packaging:
+#   npm ci && npm run build && cp -r ../dist/* ./
+# (kept out of git; see openwrt/Makefile header for the full build flow)

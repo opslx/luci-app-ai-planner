@@ -1,0 +1,13 @@
+{
+	"admin/services/ai-planner": {
+		"title": "AI Wi-Fi 布放",
+		"order": 60,
+		"action": {
+			"type": "view",
+			"path": "ai-planner/app"
+		},
+		"depends": {
+			"acl": ["luci-app-ai-planner"]
+		}
+	}
+}

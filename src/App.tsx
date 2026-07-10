@@ -14,7 +14,7 @@ export default function App() {
             <p className="brand-sub">AI 户型布放 · 信号图谱</p>
           </div>
         </div>
-        <p className="tagline">拖墙门窗或手绘户型，识别平面后仿真全屋 Wi‑Fi 覆盖</p>
+        <p className="tagline">从 OpenWrt 读取路由信息 → AI 生成户型并分析全屋 Wi‑Fi 覆盖 → 手动微调</p>
       </header>
 
       <main className="workspace">
