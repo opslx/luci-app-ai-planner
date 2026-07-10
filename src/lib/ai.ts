@@ -29,9 +29,9 @@ export interface AiAnalysisResult {
 
 function defaultSettings(): AiSettings {
   return {
-    apiBase: localStorage.getItem('changtu_api_base') || 'https://api.deepseek.com/v1',
-    apiKey: localStorage.getItem('changtu_api_key') || '',
-    model: localStorage.getItem('changtu_model') || 'deepseek-chat',
+    apiBase: localStorage.getItem('luci_ai_planner_api_base') || 'https://api.deepseek.com/v1',
+    apiKey: localStorage.getItem('luci_ai_planner_api_key') || '',
+    model: localStorage.getItem('luci_ai_planner_model') || 'deepseek-chat',
   };
 }
 
@@ -40,9 +40,9 @@ export function loadAiSettings(): AiSettings {
 }
 
 export function saveAiSettings(settings: AiSettings): void {
-  localStorage.setItem('changtu_api_base', settings.apiBase);
-  localStorage.setItem('changtu_api_key', settings.apiKey);
-  localStorage.setItem('changtu_model', settings.model);
+  localStorage.setItem('luci_ai_planner_api_base', settings.apiBase);
+  localStorage.setItem('luci_ai_planner_api_key', settings.apiKey);
+  localStorage.setItem('luci_ai_planner_model', settings.model);
 }
 
 export function payloadToFloorPlan(payload: AiFloorPlanPayload, fallbackPpm = 40): FloorPlan {

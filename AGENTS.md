@@ -2,7 +2,7 @@
 
 ## Cursor Cloud specific instructions
 
-场图 Changtu is a **frontend-only** Vite + React + TypeScript single-page app (Konva canvas editor + Zustand store). There is no backend, database, or Docker; all Wi-Fi heatmap simulation runs locally in the browser.
+luci-app-ai-planner is a **frontend-only** Vite + React + TypeScript single-page app (Konva canvas editor + Zustand store). There is no backend, database, or Docker; all Wi-Fi heatmap simulation runs locally in the browser.
 
 - Node/tooling: Node 22 is available and works with the pinned Vite 8 / TypeScript 6 / React 19 stack. Dependencies are plain `npm` (see `package-lock.json`).
 - Standard commands live in `package.json` scripts — use those rather than duplicating: `npm run dev` (Vite dev server, defaults to port 5173), `npm run lint` (oxlint), `npm run build` (`tsc -b && vite build`), `npm run preview`.

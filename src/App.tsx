@@ -10,7 +10,7 @@ export default function App() {
         <div className="brand">
           <span className="mark" aria-hidden />
           <div>
-            <p className="brand-name">场图 Changtu</p>
+            <p className="brand-name">luci-app-ai-planner</p>
             <p className="brand-sub">AI 户型布放 · 信号图谱</p>
           </div>
         </div>

@@ -1,4 +1,4 @@
-# 场图 Changtu · Wi‑Fi AI 户型布放
+# luci-app-ai-planner · Wi‑Fi AI 户型布放
 
 在浏览器里绘制/手绘户型平面图，用 AI 解析墙门窗结构，并仿真房间内 Wi‑Fi 信号图谱（类似中兴「AI 布放仿真」体验）。
 
@@ -50,7 +50,7 @@ npm run preview
 
 ## 后续可接 OpenWrt
 
-本仓库是 **Web MVP**。后续可做成 `luci-app-changtu`：
+本仓库是 **Web MVP**。后续可做成 `luci-app-ai-planner`：
 
 - 从 `iwinfo` / 关联客户端读取真实 RSSI 做校准  
 - 路由端代理 AI API，避免浏览器暴露 Key  
