@@ -7,6 +7,8 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
+    "build:openwrt": "npm run build && rm -rf openwrt/htdocs/* && cp -r dist/* openwrt/htdocs/",
+    "pack:install": "bash scripts/pack-manual-install.sh",
     "lint": "oxlint",
     "preview": "vite preview"
   },

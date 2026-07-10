@@ -1,4 +1,4 @@
-import type { AiFloorPlanPayload, FloorPlan, RouterInfo, WallMaterial } from '../types/floorplan';
+import type { AiFloorPlanPayload, FloorPlan, RouterInfo, WallMaterial, WifiClient } from '../types/floorplan';
 import { uid } from '../types/floorplan';
 
 const SYSTEM_PROMPT = `你是户型图解析助手。用户会提供手绘/截图户型，或文字描述。
@@ -13,12 +13,14 @@ const SYSTEM_PROMPT = `你是户型图解析助手。用户会提供手绘/截�
   "advice": "一句话覆盖建议"
 }
 坐标为画布像素，原点左上。material 取 concrete|brick|drywall|glass。
-尽量形成闭合房间。若无法识别，返回空 walls 数组并在 advice 说明原因。`;
+只提取图中可见的墙、门、窗与文字；不要根据路由器信息臆测房间。尽量形成闭合房间，门窗必须落在对应墙上。若无法识别，返回空 walls 数组并在 advice 说明原因。`;
 
 export interface AiSettings {
   apiBase: string;
   apiKey: string;
   model: string;
+  /** Whether the model supports vision (image_url in chat). */
+  vision: boolean;
 }
 
 export interface AiAnalysisResult {
@@ -27,11 +29,18 @@ export interface AiAnalysisResult {
   raw?: string;
 }
 
+function defaultVisionForModel(model: string): boolean {
+  return /gpt-4o|gpt-4-turbo|gemini|claude-3|qwen-vl|vision|vl-|multimodal|4v/i.test(model);
+}
+
 function defaultSettings(): AiSettings {
+  const model = localStorage.getItem('luci_ai_planner_model') || 'deepseek-chat';
+  const visionStored = localStorage.getItem('luci_ai_planner_vision');
   return {
     apiBase: localStorage.getItem('luci_ai_planner_api_base') || 'https://api.deepseek.com/v1',
     apiKey: localStorage.getItem('luci_ai_planner_api_key') || '',
-    model: localStorage.getItem('luci_ai_planner_model') || 'deepseek-chat',
+    model,
+    vision: visionStored === null ? defaultVisionForModel(model) : visionStored === '1',
   };
 }
 
@@ -43,29 +52,74 @@ export function saveAiSettings(settings: AiSettings): void {
   localStorage.setItem('luci_ai_planner_api_base', settings.apiBase);
   localStorage.setItem('luci_ai_planner_api_key', settings.apiKey);
   localStorage.setItem('luci_ai_planner_model', settings.model);
+  localStorage.setItem('luci_ai_planner_vision', settings.vision ? '1' : '0');
+}
+
+/** Serialize current plan geometry as text for non-vision models. */
+export function floorPlanToGeometryNote(plan: FloorPlan): string {
+  const lines: string[] = ['当前画布几何描述（像素坐标，原点左上，画布约 960×640）：'];
+  if (plan.walls.length) {
+    lines.push('墙体：');
+    plan.walls.forEach((w, i) => {
+      lines.push(
+        `  墙${i}: (${Math.round(w.a.x)},${Math.round(w.a.y)})→(${Math.round(w.b.x)},${Math.round(w.b.y)}) 材质=${w.material}`,
+      );
+    });
+  }
+  if (plan.openings.length) {
+    lines.push('门窗（wallIndex 为墙体序号，t 为 0~1 沿墙位置）：');
+    plan.openings.forEach((o) => {
+      const wi = plan.walls.findIndex((w) => w.id === o.wallId);
+      lines.push(`  ${o.kind}: wallIndex=${wi} t=${o.t.toFixed(2)} width=${o.width}`);
+    });
+  }
+  if (plan.rooms.length) {
+    lines.push('房间标签：');
+    plan.rooms.forEach((r) => {
+      lines.push(`  ${r.name}: (${Math.round(r.x)},${Math.round(r.y)})`);
+    });
+  }
+  if (plan.strokes.length) {
+    lines.push('手绘笔画（采样点）：');
+    plan.strokes.forEach((s, i) => {
+      const pts: string[] = [];
+      for (let j = 0; j < s.points.length - 1; j += 16) {
+        pts.push(`(${Math.round(s.points[j])},${Math.round(s.points[j + 1])})`);
+      }
+      lines.push(`  笔画${i}: ${pts.join(' → ')}`);
+    });
+  }
+  if (lines.length === 1) {
+    lines.push('（画布为空，请根据用户描述推断合理户型）');
+  }
+  lines.push(`比例尺: ${plan.pixelsPerMeter} px/m`);
+  return lines.join('\n');
 }
 
 export function payloadToFloorPlan(payload: AiFloorPlanPayload, fallbackPpm = 40): FloorPlan {
-  const walls = (payload.walls || []).map((w) => ({
-    id: uid('wall'),
-    a: { x: w.x1, y: w.y1 },
-    b: { x: w.x2, y: w.y2 },
-    material: (w.material || 'brick') as WallMaterial,
-  }));
+  const walls = (payload.walls || [])
+    .filter((w) => [w.x1, w.y1, w.x2, w.y2].every(Number.isFinite))
+    .filter((w) => Math.hypot(w.x2 - w.x1, w.y2 - w.y1) >= 8)
+    .map((w) => ({
+      id: uid('wall'),
+      a: { x: Math.round(w.x1), y: Math.round(w.y1) },
+      b: { x: Math.round(w.x2), y: Math.round(w.y2) },
+      material: (w.material || 'brick') as WallMaterial,
+    }));
 
   const openings = [
     ...(payload.doors || []).map((d) => ({
       id: uid('door'),
       wallId: walls[d.wallIndex]?.id,
-      t: d.t,
-      width: d.width,
+      t: Math.max(0, Math.min(1, d.t)),
+      width: Math.max(12, d.width),
       kind: 'door' as const,
     })),
     ...(payload.windows || []).map((w) => ({
       id: uid('window'),
       wallId: walls[w.wallIndex]?.id,
-      t: w.t,
-      width: w.width,
+      t: Math.max(0, Math.min(1, w.t)),
+      width: Math.max(12, w.width),
       kind: 'window' as const,
     })),
   ].filter((o) => o.wallId);
@@ -74,12 +128,14 @@ export function payloadToFloorPlan(payload: AiFloorPlanPayload, fallbackPpm = 40
     walls,
     openings,
     aps: [],
-    rooms: (payload.rooms || []).map((r) => ({
-      id: uid('room'),
-      x: r.x,
-      y: r.y,
-      name: r.name,
-    })),
+    rooms: (payload.rooms || [])
+      .filter((r) => Number.isFinite(r.x) && Number.isFinite(r.y) && Boolean(r.name?.trim()))
+      .map((r) => ({
+        id: uid('room'),
+        x: Math.round(r.x),
+        y: Math.round(r.y),
+        name: r.name.trim(),
+      })),
     strokes: [],
     pixelsPerMeter: payload.scale?.pixelsPerMeter || fallbackPpm,
   };
@@ -218,32 +274,13 @@ export async function generateFloorPlan(options: {
 
 export { routerInfoToText };
 
-export async function recognizeFloorPlan(options: {
-  imageDataUrl?: string;
-  note?: string;
-  settings?: AiSettings;
-}): Promise<AiAnalysisResult> {
-  const settings = options.settings || loadAiSettings();
-  if (!settings.apiKey) {
-    return mockRecognizeFromStrokes();
-  }
+export { surveyToText } from './survey';
 
-  const userContent: Array<Record<string, unknown>> = [
-    {
-      type: 'text',
-      text:
-        options.note ||
-        '请解析这张户型草图，提取墙、门、窗与房间名称，输出规定 JSON。画布大约 900x600。',
-    },
-  ];
-
-  if (options.imageDataUrl) {
-    userContent.push({
-      type: 'image_url',
-      image_url: { url: options.imageDataUrl },
-    });
-  }
-
+async function chatCompletion(
+  settings: AiSettings,
+  messages: Array<{ role: string; content: string | Array<Record<string, unknown>> }>,
+  temperature: number,
+): Promise<string> {
   const res = await fetch(`${settings.apiBase.replace(/\/$/, '')}/chat/completions`, {
     method: 'POST',
     headers: {
@@ -252,26 +289,104 @@ export async function recognizeFloorPlan(options: {
     },
     body: JSON.stringify({
       model: settings.model,
-      temperature: 0.2,
-      messages: [
-        { role: 'system', content: SYSTEM_PROMPT },
-        { role: 'user', content: userContent },
-      ],
+      temperature,
+      messages,
     }),
   });
-
   if (!res.ok) {
     const errText = await res.text();
     throw new Error(`AI 请求失败: ${res.status} ${errText}`);
   }
-
   const data = await res.json();
-  const text: string = data.choices?.[0]?.message?.content || '';
+  return data.choices?.[0]?.message?.content || '';
+}
+
+/** Format online clients for AI analysis prompts. */
+export function clientsToText(clients: WifiClient[]): string {
+  if (!clients.length) return '暂无在线终端';
+  return clients
+    .map((c) => {
+      const name = c.hostname || `MAC··${c.mac.slice(-5)}`;
+      const room = c.suspectedRoomName ?? '未标注房间';
+      const conf = c.confidence === 'high' ? '高' : c.confidence === 'medium' ? '中' : '低';
+      const quality = [
+        c.snr != null ? `SNR ${c.snr}dB` : '',
+        c.rxRateMbps != null ? `下行 ${c.rxRateMbps.toFixed(0)}Mbps` : '',
+        c.txRateMbps != null ? `上行 ${c.txRateMbps.toFixed(0)}Mbps` : '',
+      ]
+        .filter(Boolean)
+        .join('，');
+      return `${name} (${c.band}G ${c.signal}dBm${quality ? `，${quality}` : ''}，疑似${room}，置信${conf})`;
+    })
+    .join('；');
+}
+
+export async function recognizeFloorPlan(options: {
+  imageDataUrl?: string;
+  note?: string;
+  geometryNote?: string;
+  settings?: AiSettings;
+}): Promise<AiAnalysisResult & { usedVision?: boolean }> {
+  const settings = options.settings || loadAiSettings();
+  if (!settings.apiKey) {
+    return mockRecognizeFromStrokes();
+  }
+
+  let userText =
+    options.note ||
+    '请解析户型草图，提取墙、门、窗与房间名称，输出规定 JSON。画布大约 960×640。';
+  if (options.geometryNote) {
+    userText += `\n\n${options.geometryNote}`;
+  }
+
+  const tryVision = settings.vision && !!options.imageDataUrl;
+
+  async function run(withVision: boolean): Promise<string> {
+    const userContent: string | Array<Record<string, unknown>> = withVision
+      ? [
+          { type: 'text', text: userText },
+          { type: 'image_url', image_url: { url: options.imageDataUrl } },
+        ]
+      : userText;
+    return chatCompletion(
+      settings,
+      [
+        { role: 'system', content: SYSTEM_PROMPT },
+        { role: 'user', content: userContent },
+      ],
+      0.2,
+    );
+  }
+
+  let text: string;
+  let usedVision = false;
+  try {
+    if (tryVision) {
+      text = await run(true);
+      usedVision = true;
+    } else {
+      text = await run(false);
+    }
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    if (tryVision && msg.includes('image_url')) {
+      text = await run(false);
+      usedVision = false;
+    } else {
+      throw e;
+    }
+  }
+
   const parsed = extractJson(text) as AiFloorPlanPayload & { advice?: string };
   return {
     plan: payloadToFloorPlan(parsed),
-    advice: parsed.advice || '已解析户型，请微调墙体后放置路由并查看热力图。',
+    advice:
+      parsed.advice ||
+      (usedVision
+        ? '已解析户型，请微调墙体后放置路由并查看热力图。'
+        : '已用文字描述识别户型（当前模型不支持识图）。请核对并拖到真实靠墙位置。'),
     raw: text,
+    usedVision,
   };
 }
 

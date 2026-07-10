@@ -1,0 +1,36 @@
+<%#
+ LuCI template for OpenWrt 18.06 — embeds the prebuilt SPA via iframe.
+ Static assets live at /www/luci-app-ai-planner/ (installed by this package).
+-%>
+<%+header%>
+
+<h2 name="content"><%:AI Wi-Fi 布放%></h2>
+
+<div class="cbi-map" id="ai-planner-wrap">
+	<div class="cbi-section">
+		<div class="cbi-section-node">
+			<iframe
+				id="ai-planner-frame"
+				title="AI Wi-Fi 布放"
+				src="/luci-app-ai-planner/index.html"
+				style="width:100%;min-height:calc(100vh - 220px);border:0;border-radius:8px;background:#f4f6f9;"
+			></iframe>
+		</div>
+	</div>
+</div>
+
+<script type="text/javascript">
+// Legacy LuCI: pass ubus session to SPA if iframe cannot read sysauth cookie.
+(function () {
+	var frame = document.getElementById('ai-planner-frame');
+	if (!frame) return;
+	var m = document.cookie.match(/(?:^|;\s*)sysauth(?:_https?)?=([^;]+)/);
+	if (!m) return;
+	var session = decodeURIComponent(m[1]);
+	if (frame.src.indexOf('session=') < 0) {
+		frame.src = '/luci-app-ai-planner/index.html?session=' + encodeURIComponent(session);
+	}
+})();
+</script>
+
+<%+footer%>

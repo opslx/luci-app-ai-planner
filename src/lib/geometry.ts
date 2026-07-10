@@ -41,38 +41,26 @@ export function nearestWall(
   return best ? { wall: best.wall, t: best.t, point: best.point } : null;
 }
 
-/** Count wall crossings along segment AP → sample, skip openings approximately by loss model elsewhere */
-export function segmentHitsWall(a: Point, b: Point, wall: Wall): boolean {
-  return segmentsIntersect(a, b, wall.a, wall.b);
-}
+export function segmentWallIntersection(
+  a: Point,
+  b: Point,
+  wall: Wall,
+): { pathT: number; wallT: number } | null {
+  const rx = b.x - a.x;
+  const ry = b.y - a.y;
+  const sx = wall.b.x - wall.a.x;
+  const sy = wall.b.y - wall.a.y;
+  const denominator = rx * sy - ry * sx;
+  if (Math.abs(denominator) < 1e-9) return null;
 
-function orient(p: Point, q: Point, r: Point): number {
-  const v = (q.y - p.y) * (r.x - q.x) - (q.x - p.x) * (r.y - q.y);
-  if (Math.abs(v) < 1e-9) return 0;
-  return v > 0 ? 1 : 2;
-}
-
-function onSegment(p: Point, q: Point, r: Point): boolean {
-  return (
-    q.x <= Math.max(p.x, r.x) &&
-    q.x >= Math.min(p.x, r.x) &&
-    q.y <= Math.max(p.y, r.y) &&
-    q.y >= Math.min(p.y, r.y)
-  );
-}
-
-export function segmentsIntersect(p1: Point, q1: Point, p2: Point, q2: Point): boolean {
-  const o1 = orient(p1, q1, p2);
-  const o2 = orient(p1, q1, q2);
-  const o3 = orient(p2, q2, p1);
-  const o4 = orient(p2, q2, q1);
-
-  if (o1 !== o2 && o3 !== o4) return true;
-  if (o1 === 0 && onSegment(p1, p2, q1)) return true;
-  if (o2 === 0 && onSegment(p1, q2, q1)) return true;
-  if (o3 === 0 && onSegment(p2, p1, q2)) return true;
-  if (o4 === 0 && onSegment(p2, q1, q2)) return true;
-  return false;
+  const qpx = wall.a.x - a.x;
+  const qpy = wall.a.y - a.y;
+  const pathT = (qpx * sy - qpy * sx) / denominator;
+  const wallT = (qpx * ry - qpy * rx) / denominator;
+  if (pathT <= 1e-6 || pathT >= 1 - 1e-6 || wallT < -1e-6 || wallT > 1 + 1e-6) {
+    return null;
+  }
+  return { pathT, wallT: Math.max(0, Math.min(1, wallT)) };
 }
 
 export function snap(value: number, grid = 10): number {

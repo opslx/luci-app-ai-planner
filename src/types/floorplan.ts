@@ -39,6 +39,8 @@ export interface AccessPoint {
   /** dBm transmit power approximation */
   power: number;
   band: '2.4' | '5' | '6';
+  role?: 'main' | 'node';
+  nodeId?: string;
 }
 
 export interface RoomLabel {
@@ -78,6 +80,30 @@ export interface RouterRadio {
   clients?: number;
 }
 
+export type ClientConfidence = 'high' | 'medium' | 'low';
+
+/** Associated Wi-Fi client as reported by iwinfo (OpenWrt) or demo data */
+export interface WifiClient {
+  mac: string;
+  hostname?: string;
+  /** measured RSSI in dBm */
+  signal: number;
+  noise?: number;
+  snr?: number;
+  inactiveMs?: number;
+  rxRateMbps?: number;
+  txRateMbps?: number;
+  band: '2.4' | '5' | '6';
+  ifname: string;
+  suspectedRoomId?: string;
+  suspectedRoomName?: string;
+  confidence?: ClientConfidence;
+  /** free-space estimate from RSSI, meters */
+  estimatedDistanceM?: number;
+  /** per-AP RSSI when mesh has multiple nodes */
+  observations?: Array<{ apId: string; signal: number }>;
+}
+
 /** Router information, sourced from an OpenWrt system (ubus) or a demo fallback */
 export interface RouterInfo {
   model: string;
@@ -86,6 +112,8 @@ export interface RouterInfo {
   radios: RouterRadio[];
   /** total associated clients across radios */
   clients: number;
+  /** live associated clients (may be empty until polled) */
+  clientList: WifiClient[];
   /** seconds since boot */
   uptime?: number;
   /** where the data came from */
@@ -98,7 +126,39 @@ export interface RoomSignal {
   name: string;
   /** best RSSI at the room label position, dBm */
   rssi: number;
+  calibratedRssi?: number;
   level: SignalLevel;
+}
+
+/** One RSSI sample taken while standing in a labelled room */
+export interface SurveySample {
+  id: string;
+  roomId: string;
+  roomName: string;
+  mac: string;
+  signal: number;
+  band: '2.4' | '5' | '6';
+  ts: number;
+}
+
+export interface WalkSurveyPoint {
+  id: string;
+  x: number;
+  y: number;
+  mac: string;
+  signal: number;
+  band: '2.4' | '5' | '6';
+  sampleCount: number;
+  ts: number;
+}
+
+/** Calibrated offset between simulated and measured RSSI per room */
+export interface RoomCalibration {
+  roomId: string;
+  roomName: string;
+  measuredRssi: number;
+  simulatedRssi: number;
+  offsetDb: number;
 }
 
 export interface AiFloorPlanPayload {

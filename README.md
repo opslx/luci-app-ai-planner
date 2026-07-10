@@ -76,6 +76,10 @@ make package/luci-app-ai-planner/compile V=s
 
 > 浏览器直接访问（非路由环境）时，ubus 不可达，`fetchRouterInfo` 会自动回退到演示路由数据。
 
+### OpenWrt 18.06 / ImmortalWrt
+
+18.06 使用 **Lua controller + 模板** 注册菜单（已内置），详见 [`openwrt/README.md`](openwrt/README.md) 手动部署步骤。终端 RSSI 在缺少 `iwinfo` ubus 时会回退解析 `network.wireless status`。
+
 ### 后续可扩展
 
 - 从 `iwinfo` 关联客户端读取真实 RSSI 做校准

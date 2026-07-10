@@ -52,6 +52,18 @@ define Package/luci-app-ai-planner/install
 	$(INSTALL_DIR) $(1)/www/luci-static/resources/view/ai-planner
 	$(INSTALL_DATA) ./root/www/luci-static/resources/view/ai-planner/app.js \
 		$(1)/www/luci-static/resources/view/ai-planner/app.js
+	$(INSTALL_DIR) $(1)/usr/lib/lua/luci/controller
+	$(INSTALL_DATA) ./root/usr/lib/lua/luci/controller/ai-planner.lua \
+		$(1)/usr/lib/lua/luci/controller/ai-planner.lua
+	$(INSTALL_DIR) $(1)/usr/lib/lua/luci/view/ai-planner
+	$(INSTALL_DATA) ./root/usr/lib/lua/luci/view/ai-planner/app.htm \
+		$(1)/usr/lib/lua/luci/view/ai-planner/app.htm
+endef
+
+define Package/luci-app-ai-planner/postinst
+#!/bin/sh
+[ -n "$${IPKG_INSTROOT}" ] || /etc/init.d/rpcd restart 2>/dev/null || true
+exit 0
 endef
 
 $(eval $(call BuildPackage,luci-app-ai-planner))

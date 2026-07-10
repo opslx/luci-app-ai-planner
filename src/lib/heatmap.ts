@@ -1,15 +1,21 @@
 import {
   MATERIAL_LOSS_DB,
   OPENING_LOSS_DB,
-  type AccessPoint,
-  type FloorPlan,
-  type Opening,
-  type Point,
-  type RoomSignal,
-  type SignalLevel,
-  type Wall,
 } from '../types/floorplan';
-import { dist, pointOnWall, segmentHitsWall, wallLength } from './geometry';
+import type {
+  AccessPoint,
+  ClientConfidence,
+  FloorPlan,
+  Opening,
+  Point,
+  RoomCalibration,
+  RoomSignal,
+  SignalLevel,
+  Wall,
+  WalkSurveyPoint,
+  WifiClient,
+} from '../types/floorplan';
+import { dist, pointOnWall, segmentWallIntersection, wallLength } from './geometry';
 
 export interface HeatmapResult {
   width: number;
@@ -25,30 +31,111 @@ export interface HeatmapResult {
   max: number;
 }
 
-function openingCoversHit(wall: Wall, openings: Opening[], sample: Point, ap: Point): boolean {
-  if (!segmentHitsWall(ap, sample, wall)) return false;
-  const related = openings.filter((o) => o.wallId === wall.id);
-  if (!related.length) return false;
+function pathLossDb(meters: number, band: AccessPoint['band']): number {
+  const oneMeterLoss = band === '2.4' ? 40.1 : band === '5' ? 46.7 : 48.3;
+  const pathLossExponent = band === '2.4' ? 2.3 : band === '5' ? 2.6 : 2.8;
+  return oneMeterLoss + 10 * pathLossExponent * Math.log10(Math.max(meters, 0.8));
+}
 
-  // Approximate hit position on wall by projecting midpoint of AP-sample onto wall? Use closest point on wall to line.
-  // Simpler: project sample→ap intersection approx as projection of midpoint.
-  const mid = { x: (ap.x + sample.x) / 2, y: (ap.y + sample.y) / 2 };
-  const len = wallLength(wall) || 1;
-  const dx = wall.b.x - wall.a.x;
-  const dy = wall.b.y - wall.a.y;
-  const t = Math.max(0, Math.min(1, ((mid.x - wall.a.x) * dx + (mid.y - wall.a.y) * dy) / (len * len)));
+export function distanceFromRssi(
+  rssi: number,
+  txPower: number,
+  band: AccessPoint['band'],
+): number {
+  const oneMeterLoss = band === '2.4' ? 40.1 : band === '5' ? 46.7 : 48.3;
+  const pathLossExponent = band === '2.4' ? 2.3 : band === '5' ? 2.6 : 2.8;
+  const loss = txPower - rssi;
+  const meters = 10 ** ((loss - oneMeterLoss) / (10 * pathLossExponent));
+  return Math.max(0.3, Math.min(meters, 80));
+}
 
-  return related.some((o) => {
-    const half = o.width / (2 * len);
-    return Math.abs(t - o.t) <= half;
+export function rssiAtPoint(
+  plan: FloorPlan,
+  point: Point,
+  ap: AccessPoint,
+): number {
+  return rssiAt(point, ap, plan.walls, plan.openings, plan.pixelsPerMeter);
+}
+
+/** Room signals with optional measured RSSI from walk survey calibration. */
+export function roomSignalsWithCalibration(
+  plan: FloorPlan,
+  calibrations: RoomCalibration[] = [],
+): Array<RoomSignal & { measuredRssi?: number; offsetDb?: number }> {
+  const calMap = new Map(calibrations.map((c) => [c.roomId, c]));
+  return roomSignals(plan).map((r) => {
+    const cal = calMap.get(r.roomId);
+    return cal
+      ? {
+          ...r,
+          calibratedRssi: r.rssi + cal.offsetDb,
+          level: signalLevel(r.rssi + cal.offsetDb),
+          measuredRssi: cal.measuredRssi,
+          offsetDb: cal.offsetDb,
+        }
+      : r;
   });
 }
 
-function pathLossDb(meters: number, band: AccessPoint['band']): number {
-  const f = band === '2.4' ? 2.4e9 : band === '5' ? 5.2e9 : 6.2e9;
-  // Free-space path loss
-  const fspl = 20 * Math.log10(Math.max(meters, 0.3)) + 20 * Math.log10(f) - 147.55;
-  return fspl;
+function confidenceFromScore(score: number): ClientConfidence {
+  if (score < 5) return 'high';
+  if (score < 12) return 'medium';
+  return 'low';
+}
+
+/** Match measured client RSSI to the most likely labelled room (single-AP coarse estimate). */
+export function estimateClientLocations(
+  plan: FloorPlan,
+  clients: WifiClient[],
+  calibrations: RoomCalibration[] = [],
+): WifiClient[] {
+  const offsetByRoom = new Map(calibrations.map((c) => [c.roomId, c.offsetDb]));
+
+  if (!plan.aps.length) {
+    return clients.map((c) => ({
+      ...c,
+      estimatedDistanceM: distanceFromRssi(c.signal, 20, c.band),
+    }));
+  }
+
+  return clients.map((client) => {
+    const bandAps = plan.aps.filter((ap) => ap.band === client.band);
+    const apsToUse = bandAps.length ? bandAps : plan.aps;
+    const primaryAp = apsToUse[0];
+    const estimatedDistanceM = distanceFromRssi(client.signal, primaryAp.power, client.band);
+
+    if (!plan.rooms.length) {
+      return { ...client, estimatedDistanceM };
+    }
+
+    let bestRoom = plan.rooms[0];
+    let bestScore = Infinity;
+
+    for (const room of plan.rooms) {
+      const offset = offsetByRoom.get(room.id) ?? 0;
+      let score = 0;
+      for (const ap of apsToUse) {
+        const simRssi = rssiAtPoint(plan, { x: room.x, y: room.y }, ap);
+        score += Math.abs(simRssi + offset - client.signal);
+      }
+      if (score < bestScore) {
+        bestScore = score;
+        bestRoom = room;
+      }
+    }
+
+    return {
+      ...client,
+      estimatedDistanceM,
+      suspectedRoomId: bestRoom.id,
+      suspectedRoomName: bestRoom.name,
+      confidence: confidenceFromScore(bestScore / apsToUse.length),
+      observations: apsToUse.map((ap) => ({
+        apId: ap.id,
+        signal: client.signal,
+      })),
+    };
+  });
 }
 
 function rssiAt(
@@ -62,9 +149,15 @@ function rssiAt(
   let loss = pathLossDb(meters, ap.band);
 
   for (const wall of walls) {
-    if (!segmentHitsWall(ap, sample, wall)) continue;
-    if (openingCoversHit(wall, openings, sample, ap)) {
-      const kind = openings.find((o) => o.wallId === wall.id)?.kind ?? 'door';
+    const hit = segmentWallIntersection(ap, sample, wall);
+    if (!hit) continue;
+    const opening = openings.find((o) => {
+      if (o.wallId !== wall.id) return false;
+      const half = o.width / (2 * (wallLength(wall) || 1));
+      return Math.abs(hit.wallT - o.t) <= half;
+    });
+    if (opening) {
+      const kind = opening.kind;
       loss += OPENING_LOSS_DB[kind];
     } else {
       loss += MATERIAL_LOSS_DB[wall.material];
@@ -119,15 +212,15 @@ export function computeHeatmap(
   };
 }
 
-export function rssiToRgba(rssi: number, min: number, max: number): [number, number, number, number] {
-  const t = Math.max(0, Math.min(1, (rssi - min) / Math.max(max - min, 1e-3)));
-  // blue → cyan → green → yellow → red
+export function rssiToRgba(rssi: number, _min: number, _max: number): [number, number, number, number] {
+  const t = Math.max(0, Math.min(1, (rssi + 85) / 40));
+  // ZTE-style: blue (weak) → cyan → yellow → red (strong)
   const stops: Array<[number, number, number]> = [
-    [30, 64, 175],
-    [8, 145, 178],
-    [22, 163, 74],
-    [234, 179, 8],
-    [220, 38, 38],
+    [37, 99, 235],
+    [14, 165, 233],
+    [52, 211, 153],
+    [251, 191, 36],
+    [239, 68, 68],
   ];
   const scaled = t * (stops.length - 1);
   const i = Math.floor(scaled);
@@ -138,7 +231,7 @@ export function rssiToRgba(rssi: number, min: number, max: number): [number, num
     Math.round(a[0] + (b[0] - a[0]) * f),
     Math.round(a[1] + (b[1] - a[1]) * f),
     Math.round(a[2] + (b[2] - a[2]) * f),
-    Math.round(55 + t * 140),
+    Math.round(38 + t * 115),
   ];
 }
 
@@ -204,6 +297,21 @@ export function signalLevel(rssi: number): SignalLevel {
   return 'poor';
 }
 
+/** ZTE-style signal colors: red = strong, blue = weak */
+export const SIGNAL_LEVEL_COLORS: Record<SignalLevel, string> = {
+  excellent: '#ef4444',
+  good: '#f97316',
+  weak: '#38bdf8',
+  poor: '#2563eb',
+};
+
+export const SIGNAL_LEVEL_LABELS: Record<SignalLevel, string> = {
+  excellent: '优秀',
+  good: '良好',
+  weak: '偏弱',
+  poor: '较差',
+};
+
 /** Best RSSI (across all APs) at an arbitrary point on the plan. */
 export function bestRssiAt(plan: FloorPlan, point: Point): number {
   let best = -120;
@@ -212,6 +320,60 @@ export function bestRssiAt(plan: FloorPlan, point: Point): number {
     if (rssi > best) best = rssi;
   }
   return best;
+}
+
+function bestRssiAtForBand(plan: FloorPlan, point: Point, band: AccessPoint['band']): number {
+  const aps = plan.aps.filter((ap) => ap.band === band);
+  const apsToUse = aps.length ? aps : plan.aps;
+  let best = -120;
+  for (const ap of apsToUse) {
+    const rssi = rssiAt(point, ap, plan.walls, plan.openings, plan.pixelsPerMeter);
+    if (rssi > best) best = rssi;
+  }
+  return best;
+}
+
+function walkSurveyOffsetAt(plan: FloorPlan, point: Point, samples: WalkSurveyPoint[]): number {
+  if (!samples.length) return 0;
+  let weightedOffset = 0;
+  let totalWeight = 0;
+
+  for (const sample of samples) {
+    const simulated = bestRssiAtForBand(plan, sample, sample.band);
+    const offset = Math.max(-25, Math.min(25, sample.signal - simulated));
+    const distanceM = dist(point, sample) / plan.pixelsPerMeter;
+    const weight = 1 / Math.max(1, distanceM * distanceM);
+    weightedOffset += offset * weight;
+    totalWeight += weight;
+  }
+  return totalWeight ? weightedOffset / totalWeight : 0;
+}
+
+export function applyWalkSurveyToHeatmap(
+  plan: FloorPlan,
+  result: HeatmapResult,
+  samples: WalkSurveyPoint[],
+): HeatmapResult {
+  if (!samples.length) return result;
+  const values = new Float32Array(result.values.length);
+  let min = Infinity;
+  let max = -Infinity;
+
+  for (let row = 0; row < result.rows; row++) {
+    for (let col = 0; col < result.cols; col++) {
+      const index = row * result.cols + col;
+      const point = {
+        x: result.originX + col * result.cellSize + result.cellSize / 2,
+        y: result.originY + row * result.cellSize + result.cellSize / 2,
+      };
+      const rssi = result.values[index] + walkSurveyOffsetAt(plan, point, samples);
+      values[index] = rssi;
+      if (rssi < min) min = rssi;
+      if (rssi > max) max = rssi;
+    }
+  }
+
+  return { ...result, values, min, max };
 }
 
 /** Estimate the signal at each labelled room (using the room label position). */

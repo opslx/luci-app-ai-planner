@@ -1,15 +1,17 @@
+import { useRef } from 'react';
+import type { ChangeEvent } from 'react';
 import type { Tool, WallMaterial } from '../types/floorplan';
 import { usePlannerStore } from '../store/usePlannerStore';
 
-const TOOLS: Array<{ id: Tool; label: string }> = [
-  { id: 'select', label: '选择' },
-  { id: 'wall', label: '墙' },
-  { id: 'door', label: '门' },
-  { id: 'window', label: '窗' },
-  { id: 'draw', label: '手绘' },
-  { id: 'ap', label: '路由' },
-  { id: 'room', label: '房间' },
-  { id: 'eraser', label: '擦除' },
+const TOOLS: Array<{ id: Tool; label: string; icon: string }> = [
+  { id: 'select', label: '选择', icon: '◎' },
+  { id: 'wall', label: '墙', icon: '▬' },
+  { id: 'door', label: '门', icon: '⌐' },
+  { id: 'window', label: '窗', icon: '▭' },
+  { id: 'draw', label: '手绘', icon: '✎' },
+  { id: 'ap', label: '路由', icon: '◉' },
+  { id: 'room', label: '房间', icon: '□' },
+  { id: 'eraser', label: '擦除', icon: '✕' },
 ];
 
 const MATERIALS: Array<{ id: WallMaterial; label: string }> = [
@@ -24,18 +26,18 @@ export function Toolbar() {
     tool,
     material,
     band,
-    showHeatmap,
     plan,
     aiBusy,
     setTool,
     setMaterial,
     setBand,
-    setShowHeatmap,
     setPixelsPerMeter,
     clearPlan,
     runAiRecognize,
     runAiAnalyze,
+    setSourceFloorPlanImage,
   } = usePlannerStore();
+  const imageInputRef = useRef<HTMLInputElement>(null);
 
   const exportCanvasImage = async () => {
     const stage = document.querySelector('#floorplan-stage canvas');
@@ -46,10 +48,29 @@ export function Toolbar() {
     await runAiRecognize(stage.toDataURL('image/png'));
   };
 
+  const recognizeUploadedImage = (event: ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    event.target.value = '';
+    if (!file) return;
+    if (!file.type.startsWith('image/')) return;
+    if (file.size > 8 * 1024 * 1024) {
+      window.alert('户型图请控制在 8MB 以内');
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = () => {
+      const imageDataUrl = typeof reader.result === 'string' ? reader.result : null;
+      if (!imageDataUrl) return;
+      setSourceFloorPlanImage(imageDataUrl);
+      void runAiRecognize(imageDataUrl);
+    };
+    reader.readAsDataURL(file);
+  };
+
   return (
     <aside className="toolbar">
       <div className="tool-block">
-        <h3>绘制工具</h3>
+        <h3>绘制</h3>
         <div className="tool-grid">
           {TOOLS.map((t) => (
             <button
@@ -57,8 +78,10 @@ export function Toolbar() {
               type="button"
               className={tool === t.id ? 'tool active' : 'tool'}
               onClick={() => setTool(t.id)}
+              title={t.label}
             >
-              {t.label}
+              <span aria-hidden>{t.icon}</span>
+              <span>{t.label}</span>
             </button>
           ))}
         </div>
@@ -81,7 +104,7 @@ export function Toolbar() {
       </div>
 
       <div className="tool-block">
-        <h3>射频</h3>
+        <h3>频段</h3>
         <div className="chip-row">
           {(['2.4', '5', '6'] as const).map((b) => (
             <button
@@ -90,20 +113,12 @@ export function Toolbar() {
               className={band === b ? 'chip active' : 'chip'}
               onClick={() => setBand(b)}
             >
-              {b} GHz
+              {b}G
             </button>
           ))}
         </div>
-        <label className="toggle">
-          <input
-            type="checkbox"
-            checked={showHeatmap}
-            onChange={(e) => setShowHeatmap(e.target.checked)}
-          />
-          显示信号图谱
-        </label>
         <label className="field">
-          <span>比例尺 (px/m)</span>
+          <span>比例尺 px/m</span>
           <input
             type="number"
             min={10}
@@ -115,13 +130,23 @@ export function Toolbar() {
       </div>
 
       <div className="tool-block actions">
-        <button type="button" className="btn primary" disabled={aiBusy} onClick={() => void exportCanvasImage()}>
-          AI 识别户型
+        <input
+          ref={imageInputRef}
+          type="file"
+          accept="image/png,image/jpeg,image/webp"
+          hidden
+          onChange={recognizeUploadedImage}
+        />
+        <button type="button" className="btn primary full" disabled={aiBusy} onClick={() => imageInputRef.current?.click()}>
+          上传户型图识别
         </button>
-        <button type="button" className="btn" disabled={aiBusy} onClick={() => void runAiAnalyze()}>
+        <button type="button" className="btn primary full" disabled={aiBusy} onClick={() => void exportCanvasImage()}>
+          识别当前画布
+        </button>
+        <button type="button" className="btn full" disabled={aiBusy} onClick={() => void runAiAnalyze()}>
           AI 分析覆盖
         </button>
-        <button type="button" className="btn ghost" onClick={() => clearPlan()}>
+        <button type="button" className="btn ghost full" onClick={() => clearPlan()}>
           清空画布
         </button>
       </div>
